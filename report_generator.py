@@ -13,6 +13,11 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 
+def months_between(start_date, end_date):
+    result = (end_date.year - start_date.year) * 12 + (end_date.month - start_date.month) - 1
+    return result
+
+
 class RentReportGenerator:
     """Класс для генерации отчета по арендным платежам"""
 
@@ -20,7 +25,7 @@ class RentReportGenerator:
         self,
         bank_file_path="docs/bank_report.xlsx",
         rent_file_path="docs/arenda_list.xlsx",
-        max_different=10,
+        max_different=0,
         report_dir="reports",
         email=""
     ):
@@ -98,6 +103,7 @@ class RentReportGenerator:
         )
 
         rent_data = pd.read_excel(self.rent_file_path)
+        rent_data['Первоначальная дата'] = pd.to_datetime(rent_data['Первоначальная дата']).dt.date
         report_rows = []
 
         for _, rent_row in rent_data.iterrows():
@@ -107,33 +113,40 @@ class RentReportGenerator:
             mask = (transfers['Сумма'] >= expected_sum - self.max_different) & \
                    (transfers['Сумма'] <= expected_sum + self.max_different)
             matched = transfers[mask]
+            months_count = months_between(rent_row["Первоначальная дата"], datetime.today().date())
 
             if matched.empty:
+                must_pay = expected_sum * months_count
                 report_rows.append({
                     "Гараж": garage,
+                    "Первоначальная дата": rent_row["Первоначальная дата"],
                     "Тип": "Нет платежей",
                     "Дата": "",
                     "Описание": "",
                     "Сумма": "",
-                    "Должен оплатить": expected_sum,
-                    "Разница": ""
+                    "Арендная плата": expected_sum,
+                    "Разница": "",
+                    "Долг": must_pay
                 })
                 continue
 
             exact_matches = []
             similar_matches = []
-
+            actual_sum = matched["Сумма"].sum()
             for _, row in matched.iterrows():
-                actual_sum = row["Сумма"]
-                diff = actual_sum - expected_sum
+
+                diff = row["Сумма"] - expected_sum
+                must_pay = expected_sum * months_count - actual_sum
                 record = {
                     "Гараж": garage,
+                    "Первоначальная дата": rent_row["Первоначальная дата"],
                     "Тип": "Оплачено" if diff == 0 else "Похожий платеж",
                     "Дата": row["Дата операции"],
                     "Описание": row["Тип операции"],
-                    "Сумма": actual_sum,
-                    "Должен оплатить": expected_sum,
-                    "Разница": diff
+                    "Сумма": row["Сумма"],
+                    "Арендная плата": expected_sum,
+                    "Разница": diff,
+                    "Долг": must_pay
                 }
                 if diff == 0:
                     exact_matches.append(record)
